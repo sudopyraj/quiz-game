@@ -1,263 +1,267 @@
 import tkinter as tk
-from tkinter import ttk
-import requests
+from tkinter import ttk, messagebox, simpledialog
 import random
-import html
+import json
+import os
 
-# ---------------------- CONFIG ----------------------
+# ------------------ CONFIG ------------------
 
-API_BASE = "https://opentdb.com/api.php?amount=1&type=multiple"
+LEADERBOARD_FILE = "leaderboard.json"
+QUESTION_TIME = 15
 
-CATEGORIES = {
-    "General Knowledge": 9,
-    "Science & Nature": 17,
-    "Science: Computers": 18,
-    "Mathematics": 19,
-    "History": 23,
-    "Geography": 22,
-}
+CATEGORIES = [
+    "General Knowledge", "Science", "Mathematics", "History",
+    "Geography", "Computers", "Physics", "Chemistry",
+    "Biology", "Sports", "Movies", "Music",
+    "Literature", "Politics", "Space", "Inventions",
+    "Programming", "AI", "Cybersecurity", "Economics",
+    "Philosophy", "Art", "World Capitals", "Mythology",
+    "Internet"
+]
 
-DIFFICULTIES = ["easy", "medium", "hard"]
+DIFFICULTY_LEVELS = ["Easy", "Medium", "Hard"]
 
-THEME = {
-    "bg": "#121212",
-    "panel": "#1e1e1e",
-    "accent": "#4CAF50",
-    "text": "#ffffff",
-    "muted": "#bbbbbb",
-    "button": "#2a2a2a",
-    "hover": "#333333"
-}
 
-# ---------------------- APP ----------------------
+# ------------------ MAIN APP ------------------
 
-class QuizApp(tk.Tk):
+class QuizApp:
 
-    def __init__(self):
-        super().__init__()
-
-        self.title("QuizMaster Pro")
-        self.geometry("1000x650")
-        self.configure(bg=THEME["bg"])
-        self.resizable(False, False)
+    def __init__(self, root):
+        self.root = root
+        self.root.title("QuizMaster Pro")
+        self.root.geometry("1100x700")
+        self.dark_mode = True
 
         self.score = 0
-        self.total = 0
-        self.correct_answer = ""
+        self.current_index = 0
+        self.time_left = QUESTION_TIME
+        self.selected_category = None
+        self.selected_difficulty = "Easy"
+        self.questions = []
 
-        self._build_layout()
+        self.load_leaderboard()
+        self.create_layout()
+        self.apply_theme()
 
-    # ---------- Layout ----------
+    # ------------------ UI LAYOUT ------------------
 
-    def _build_layout(self):
-        self.sidebar = Sidebar(self)
-        self.sidebar.pack(side="left", fill="y")
+    def create_layout(self):
+        self.main_frame = tk.Frame(self.root)
+        self.main_frame.pack(fill="both", expand=True)
 
-        self.main_area = MainArea(self)
-        self.main_area.pack(side="right", expand=True, fill="both")
+        self.create_category_panel()
+        self.create_quiz_panel()
+        self.create_status_bar()
 
-        self.status_bar = StatusBar(self)
-        self.status_bar.pack(side="bottom", fill="x")
+        self.root.bind("<Return>", lambda e: self.next_question())
+        self.root.bind("<Escape>", lambda e: self.quit_quiz())
 
-    # ---------- Quiz Logic ----------
+    def create_category_panel(self):
+        self.left_frame = tk.Frame(self.main_frame, width=250)
+        self.left_frame.pack(side="left", fill="y")
 
-    def fetch_question(self, category, difficulty):
-        url = f"{API_BASE}&category={category}&difficulty={difficulty}"
+        tk.Label(self.left_frame, text="Categories").pack(pady=10)
 
-        try:
-            response = requests.get(url, timeout=10)
-            data = response.json()["results"][0]
+        canvas = tk.Canvas(self.left_frame, highlightthickness=0)
+        scrollbar = tk.Scrollbar(self.left_frame, orient="vertical", command=canvas.yview)
+        self.scroll_frame = tk.Frame(canvas)
 
-            question = html.unescape(data["question"])
-            self.correct_answer = html.unescape(data["correct_answer"])
-            answers = [html.unescape(a) for a in data["incorrect_answers"]]
-            answers.append(self.correct_answer)
-            random.shuffle(answers)
+        self.scroll_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
 
-            self.main_area.display_question(question, answers)
+        canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
 
-        except:
-            self.status_bar.set_status("Failed to fetch question")
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
-    def check_answer(self, selected):
-        self.total += 1
+        for cat in CATEGORIES:
+            btn = tk.Button(
+                self.scroll_frame,
+                text=cat,
+                command=lambda c=cat: self.select_category(c)
+            )
+            btn.pack(fill="x", padx=5, pady=3)
 
-        if selected == self.correct_answer:
-            self.score += 1
-            self.status_bar.set_status("Correct!")
-        else:
-            self.status_bar.set_status(f"Wrong! Answer: {self.correct_answer}")
-
-        self.main_area.update_score(self.score, self.total)
-
-
-# ---------------------- SIDEBAR ----------------------
-
-class Sidebar(tk.Frame):
-
-    def __init__(self, parent):
-        super().__init__(parent, bg=THEME["panel"], width=250)
-        self.parent = parent
-
-        self.pack_propagate(False)
-
-        self._build()
-
-    def _build(self):
-        title = tk.Label(self, text="Quiz Controls",
-                         bg=THEME["panel"], fg=THEME["text"],
-                         font=("Arial", 16, "bold"))
-        title.pack(pady=20)
-
-        self.category_var = tk.StringVar()
-        self.category_box = ttk.Combobox(
-            self,
-            textvariable=self.category_var,
-            values=list(CATEGORIES.keys()),
+        # Difficulty
+        tk.Label(self.left_frame, text="Difficulty").pack(pady=10)
+        self.diff_combo = ttk.Combobox(
+            self.left_frame,
+            values=DIFFICULTY_LEVELS,
             state="readonly"
         )
-        self.category_box.set("Select Category")
-        self.category_box.pack(pady=10, padx=20)
+        self.diff_combo.set("Easy")
+        self.diff_combo.pack()
 
-        self.difficulty_var = tk.StringVar()
-        self.difficulty_box = ttk.Combobox(
-            self,
-            textvariable=self.difficulty_var,
-            values=DIFFICULTIES,
-            state="readonly"
-        )
-        self.difficulty_box.set("Select Difficulty")
-        self.difficulty_box.pack(pady=10, padx=20)
+        tk.Button(self.left_frame, text="Start Quiz", command=self.start_quiz).pack(pady=10)
+        tk.Button(self.left_frame, text="Toggle Theme", command=self.toggle_theme).pack(pady=5)
+        tk.Button(self.left_frame, text="Leaderboard", command=self.show_leaderboard).pack(pady=5)
+        tk.Button(self.left_frame, text="Quit", command=self.quit_quiz).pack(pady=20)
 
-        start_btn = StyledButton(
-            self,
-            text="Start Quiz",
-            command=self.start_quiz
-        )
-        start_btn.pack(pady=30, padx=20, fill="x")
+    def create_quiz_panel(self):
+        self.right_frame = tk.Frame(self.main_frame)
+        self.right_frame.pack(side="right", fill="both", expand=True)
 
-    def start_quiz(self):
-        cat = self.category_var.get()
-        diff = self.difficulty_var.get()
-
-        if cat in CATEGORIES and diff in DIFFICULTIES:
-            self.parent.fetch_question(CATEGORIES[cat], diff)
-
-
-# ---------------------- MAIN AREA ----------------------
-
-class MainArea(tk.Frame):
-
-    def __init__(self, parent):
-        super().__init__(parent, bg=THEME["bg"])
-        self.parent = parent
-
-        self.answer_var = tk.StringVar()
-
-        self._build()
-
-    def _build(self):
         self.question_label = tk.Label(
-            self,
-            text="Welcome to QuizMaster",
-            wraplength=600,
-            bg=THEME["bg"],
-            fg=THEME["text"],
+            self.right_frame,
+            text="Select a category and start the quiz.",
+            wraplength=700,
             font=("Arial", 18)
         )
-        self.question_label.pack(pady=40)
+        self.question_label.pack(pady=20)
 
-        self.answer_buttons = []
+        self.selected_option = tk.StringVar()
+        self.option_buttons = []
+
         for _ in range(4):
-            btn = tk.Radiobutton(
-                self,
-                text="",
-                variable=self.answer_var,
+            rb = tk.Radiobutton(
+                self.right_frame,
+                variable=self.selected_option,
                 value="",
-                bg=THEME["button"],
-                fg=THEME["text"],
-                selectcolor=THEME["accent"],
                 font=("Arial", 14),
-                anchor="w",
-                padx=10,
-                pady=10,
-                wraplength=600
+                indicatoron=0,
+                width=30
             )
-            btn.pack(fill="x", padx=100, pady=5)
-            self.answer_buttons.append(btn)
+            rb.pack(pady=5)
+            self.option_buttons.append(rb)
 
-        submit_btn = StyledButton(
-            self,
-            text="Submit",
-            command=self.submit_answer
-        )
-        submit_btn.pack(pady=30)
+        self.timer_label = tk.Label(self.right_frame, text="")
+        self.timer_label.pack(pady=10)
 
-        self.score_label = tk.Label(
-            self,
-            text="Score: 0/0",
-            bg=THEME["bg"],
-            fg=THEME["muted"],
-            font=("Arial", 12)
-        )
-        self.score_label.pack()
+        self.progress = ttk.Progressbar(self.right_frame, length=400)
+        self.progress.pack(pady=10)
 
-    def display_question(self, question, answers):
-        self.question_label.config(text=question)
-        self.answer_var.set(None)
+        tk.Button(self.right_frame, text="Next Question", command=self.next_question).pack(pady=10)
 
-        for i, btn in enumerate(self.answer_buttons):
-            btn.config(text=answers[i], value=answers[i])
+    def create_status_bar(self):
+        self.status_bar = tk.Label(self.root, text="Score: 0", anchor="w")
+        self.status_bar.pack(fill="x", side="bottom")
 
-    def submit_answer(self):
-        selected = self.answer_var.get()
-        if selected:
-            self.parent.check_answer(selected)
+    # ------------------ QUIZ LOGIC ------------------
 
-    def update_score(self, score, total):
-        self.score_label.config(text=f"Score: {score}/{total}")
+    def select_category(self, category):
+        self.selected_category = category
+
+    def generate_questions(self):
+        questions = []
+        for i in range(10):
+            correct = random.randint(1, 4)
+            options = [f"Option {j}" for j in range(1, 5)]
+            questions.append({
+                "question": f"{self.selected_category} Question {i+1}?",
+                "options": options,
+                "answer": options[correct - 1]
+            })
+        return questions
+
+    def start_quiz(self):
+        if not self.selected_category:
+            messagebox.showwarning("Warning", "Select a category first.")
+            return
+
+        self.selected_difficulty = self.diff_combo.get()
+        self.questions = self.generate_questions()
+        self.score = 0
+        self.current_index = 0
+        self.display_question()
+
+    def display_question(self):
+        if self.current_index >= len(self.questions):
+            self.finish_quiz()
+            return
+
+        q = self.questions[self.current_index]
+        self.question_label.config(text=q["question"])
+        self.selected_option.set("")
+
+        for i, option in enumerate(q["options"]):
+            self.option_buttons[i].config(text=option, value=option)
+
+        self.progress["value"] = (self.current_index / len(self.questions)) * 100
+        self.start_timer()
+
+    def next_question(self):
+        if self.current_index >= len(self.questions):
+            return
+
+        selected = self.selected_option.get()
+        correct = self.questions[self.current_index]["answer"]
+
+        if selected == correct:
+            self.score += 1
+
+        self.current_index += 1
+        self.status_bar.config(text=f"Score: {self.score}")
+        self.display_question()
+
+    def finish_quiz(self):
+        self.progress["value"] = 100
+        name = simpledialog.askstring("Quiz Finished", f"Score: {self.score}\nEnter your name:")
+        if name:
+            self.save_score(name, self.score)
+        messagebox.showinfo("Done", "Quiz completed!")
+
+    def quit_quiz(self):
+        if messagebox.askyesno("Exit", "Are you sure you want to quit?"):
+            self.root.destroy()
+
+    # ------------------ TIMER ------------------
+
+    def start_timer(self):
+        self.time_left = QUESTION_TIME
+        self.update_timer()
+
+    def update_timer(self):
+        if self.time_left > 0:
+            self.timer_label.config(text=f"Time left: {self.time_left}s")
+            self.time_left -= 1
+            self.root.after(1000, self.update_timer)
+        else:
+            self.next_question()
+
+    # ------------------ LEADERBOARD ------------------
+
+    def load_leaderboard(self):
+        if os.path.exists(LEADERBOARD_FILE):
+            with open(LEADERBOARD_FILE, "r") as f:
+                self.leaderboard = json.load(f)
+        else:
+            self.leaderboard = []
+
+    def save_score(self, name, score):
+        self.leaderboard.append({"name": name, "score": score})
+        with open(LEADERBOARD_FILE, "w") as f:
+            json.dump(self.leaderboard, f, indent=4)
+
+    def show_leaderboard(self):
+        text = "\n".join([f"{x['name']} - {x['score']}" for x in self.leaderboard])
+        messagebox.showinfo("Leaderboard", text if text else "No scores yet.")
+
+    # ------------------ THEME ------------------
+
+    def toggle_theme(self):
+        self.dark_mode = not self.dark_mode
+        self.apply_theme()
+
+    def apply_theme(self):
+        bg = "#121212" if self.dark_mode else "#f5f5f5"
+        fg = "white" if self.dark_mode else "black"
+
+        self.root.configure(bg=bg)
+        self.main_frame.configure(bg=bg)
+        self.left_frame.configure(bg=bg)
+        self.right_frame.configure(bg=bg)
+
+        self.question_label.configure(bg=bg, fg=fg)
+        self.timer_label.configure(bg=bg, fg=fg)
+        self.status_bar.configure(bg=bg, fg=fg)
 
 
-# ---------------------- STATUS BAR ----------------------
-
-class StatusBar(tk.Frame):
-
-    def __init__(self, parent):
-        super().__init__(parent, bg=THEME["panel"], height=30)
-        self.pack_propagate(False)
-
-        self.label = tk.Label(
-            self,
-            text="Ready",
-            bg=THEME["panel"],
-            fg=THEME["muted"]
-        )
-        self.label.pack(side="left", padx=10)
-
-    def set_status(self, text):
-        self.label.config(text=text)
-
-
-# ---------------------- STYLED BUTTON ----------------------
-
-class StyledButton(tk.Button):
-
-    def __init__(self, parent, text, command):
-        super().__init__(
-            parent,
-            text=text,
-            command=command,
-            bg=THEME["accent"],
-            fg="white",
-            activebackground=THEME["hover"],
-            relief="flat",
-            font=("Arial", 12),
-            pady=8
-        )
-
-
-# ---------------------- RUN ----------------------
+# ------------------ RUN ------------------
 
 if __name__ == "__main__":
-    app = QuizApp()
-    app.mainloop()
+    root = tk.Tk()
+    app = QuizApp(root)
+    root.mainloop()
