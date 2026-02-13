@@ -1,210 +1,162 @@
-# Import required libraries
-import requests       # To fetch quiz data from Open Trivia API
-import json           # To parse JSON response
-import pprint         # (Optional) Pretty print for debugging
-import random         # To shuffle answers and randomize messages
-import html           # To decode HTML entities from API response
+import requests
+import random
+import html
+import tkinter as tk
+from tkinter import ttk, messagebox
 
-# Counters to track score
-no_of_correct_answer = 0
-no_of_incorrect_answer = 0
+# ----------- CONFIG -----------
+CATEGORIES = {
+    "General Knowledge": 9,
+    "Science & Nature": 17,
+    "Science: Computers": 18,
+    "Mathematics": 19,
+    "History": 23,
+    "Geography": 22
+}
 
-# Ask user name and greet
-username = input("Type your Name here: ")
-print(f"Hey {username}, welcome to quizbuddy")
+DIFFICULTY = ["easy", "medium", "hard"]
 
-# List of difficulty levels for display
-difficulty_list0 = ["Easy", "Medium", "Hard"]
+API_URL = "https://opentdb.com/api.php?amount=1&type=multiple"
 
-# List of available quiz categories (OpenTDB category IDs)
-categories = [
-    {"id": 9,  "name": "General Knowledge"},
-    {"id": 10, "name": "Entertainment: Books"},
-    {"id": 11, "name": "Entertainment: Film"},
-    {"id": 12, "name": "Entertainment: Music"},
-    {"id": 13, "name": "Entertainment: Musicals & Theatres"},
-    {"id": 14, "name": "Entertainment: Television"},
-    {"id": 15, "name": "Entertainment: Video Games"},
-    {"id": 16, "name": "Entertainment: Board Games"},
-    {"id": 17, "name": "Science & Nature"},
-    {"id": 18, "name": "Science: Computers"},
-    {"id": 19, "name": "Science: Mathematics"},
-    {"id": 20, "name": "Mythology"},
-    {"id": 21, "name": "Sports"},
-    {"id": 22, "name": "Geography"},
-    {"id": 23, "name": "History"},
-    {"id": 24, "name": "Politics"},
-    {"id": 25, "name": "Art"},
-    {"id": 26, "name": "Celebrities"},
-    {"id": 27, "name": "Animals"},
-    {"id": 28, "name": "Vehicles"},
-    {"id": 29, "name": "Entertainment: Comics"},
-    {"id": 30, "name": "Science: Gadgets"},
-    {"id": 31, "name": "Entertainment: Japanese Anime & Manga"},
-    {"id": 32, "name": "Entertainment: Cartoon & Animations"}
-]
+# ----------- APP CLASS -----------
+class QuizApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("QuizBuddy Pro")
+        self.root.geometry("700x500")
+        self.root.configure(bg="#1e1e2f")
 
-# API difficulty values (must be lowercase for API)
-difficulty_list = ["easy", "medium", "hard"]
+        self.score = 0
+        self.total = 0
+        self.correct_answer = ""
 
-# Random positive feedback messages
-correct_messages = [
-    "Nice, you actually got it right.",
-    "Correct. Miracles do happen.",
-    "Yep, that’s the one.",
-    "You nailed it.",
-    "Right answer. Don’t let it get to your head.",
-    "Solid pick, that’s correct.",
-    "Correct. Maybe your brain is awake today.",
-    "Good job, you hit the target.",
-    "Right. Even I’m shocked.",
-    "Correct. Keep this streak before it disappears.",
-    "Yep, that's the right one.",
-    "Correct answer, no complaints from me.",
-    "You got it right. Wild.",
-    "Correct. I’ll pretend I expected that.",
-    "You’re right. Relax, I’m surprised too.",
-    "Correct. Look at you… functioning.",
-    "Yeah, that’s correct. Don’t get used to it."
-]
+        self.build_ui()
 
-# Random negative feedback messages (with correct answer inserted)
-incorrect_messages = [
-    "Nope, the correct answer is {correct_answer}.",
-    "Wrong. It’s actually {correct_answer}.",
-    "Not even close. Correct is {correct_answer}.",
-    "Incorrect. The right one is {correct_answer}.",
-    "Nah, that’s not it. It’s {correct_answer}.",
-    "Nope. Try again, correct is {correct_answer}.",
-    "Wrong guess. Correct answer: {correct_answer}.",
-    "You missed it. It's {correct_answer}.",
-    "Incorrect. The real answer is {correct_answer}.",
-    "Nope. Should’ve gone with {correct_answer}.",
-    "Not right. The correct one was {correct_answer}.",
-    "Missed it. Correct answer: {correct_answer}.",
-    "That’s wrong. Real answer is {correct_answer}.",
-    "Nope. The answer is {correct_answer}, not whatever you guessed.",
-    "Wrong again. Correct is {correct_answer}.",
-    "Incorrect. It was {correct_answer}.",
-    "That’s not correct. Try {correct_answer} next time."
-]
+    def build_ui(self):
+        title = tk.Label(self.root, text="QuizBuddy", 
+                         font=("Helvetica", 24, "bold"),
+                         fg="white", bg="#1e1e2f")
+        title.pack(pady=10)
 
-# Display categories
-x = 1
-input("\nType Enter to see Categories: ")
-for cat in categories:
-    print(str(x) + ":", cat["name"])
-    x += 1
+        # Category Dropdown
+        self.category_var = tk.StringVar()
+        self.category_box = ttk.Combobox(
+            self.root, textvariable=self.category_var,
+            values=list(CATEGORIES.keys()), state="readonly"
+        )
+        self.category_box.set("Select Category")
+        self.category_box.pack(pady=5)
 
-# Function to safely take numeric input from user
-def userinput(cdnum, name):
-    while True:
+        # Difficulty Dropdown
+        self.difficulty_var = tk.StringVar()
+        self.difficulty_box = ttk.Combobox(
+            self.root, textvariable=self.difficulty_var,
+            values=["easy", "medium", "hard"], state="readonly"
+        )
+        self.difficulty_box.set("Select Difficulty")
+        self.difficulty_box.pack(pady=5)
+
+        # Question Label
+        self.question_label = tk.Label(
+            self.root, text="Click Start to begin",
+            wraplength=600, justify="center",
+            font=("Arial", 14),
+            fg="white", bg="#1e1e2f"
+        )
+        self.question_label.pack(pady=20)
+
+        # Answer Buttons
+        self.answer_var = tk.StringVar()
+        self.answer_buttons = []
+
+        for _ in range(4):
+            rb = tk.Radiobutton(
+                self.root, text="", variable=self.answer_var,
+                font=("Arial", 12),
+                fg="white", bg="#2a2a40",
+                selectcolor="#444466",
+                wraplength=500, anchor="w", justify="left"
+            )
+            rb.pack(fill="x", padx=50, pady=5)
+            self.answer_buttons.append(rb)
+
+        # Buttons Frame
+        btn_frame = tk.Frame(self.root, bg="#1e1e2f")
+        btn_frame.pack(pady=20)
+
+        self.start_btn = tk.Button(
+            btn_frame, text="Start Quiz",
+            command=self.fetch_question,
+            bg="#4CAF50", fg="white",
+            font=("Arial", 12), width=15
+        )
+        self.start_btn.grid(row=0, column=0, padx=10)
+
+        self.next_btn = tk.Button(
+            btn_frame, text="Submit Answer",
+            command=self.check_answer,
+            bg="#2196F3", fg="white",
+            font=("Arial", 12), width=15
+        )
+        self.next_btn.grid(row=0, column=1, padx=10)
+
+        # Score Label
+        self.score_label = tk.Label(
+            self.root, text="Score: 0/0",
+            font=("Arial", 12),
+            fg="white", bg="#1e1e2f"
+        )
+        self.score_label.pack(pady=10)
+
+    def fetch_question(self):
+        category = self.category_var.get()
+        difficulty = self.difficulty_var.get()
+
+        if category not in CATEGORIES or difficulty not in DIFFICULTY:
+            messagebox.showwarning("Warning", "Select category and difficulty")
+            return
+
+        url = f"{API_URL}&category={CATEGORIES[category]}&difficulty={difficulty}"
+
         try:
-            user_input = int(input(f"\nType the {name} Number Here: "))
-        except ValueError:
-            # If user enters non-integer value
-            print("type a valid integer here: ")
-            continue
-        
-        # Check if input is within valid range
-        if user_input > cdnum or user_input <= 0:
-            print(f"Type the valid {name} number here:")
-            continue
-        
-        return user_input
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            q = data["results"][0]
 
-# Get category and difficulty from user
-category_choosen = userinput(24, "category")
+            question = html.unescape(q["question"])
+            self.correct_answer = html.unescape(q["correct_answer"])
+            answers = [html.unescape(ans) for ans in q["incorrect_answers"]]
+            answers.append(self.correct_answer)
+            random.shuffle(answers)
 
-x = 1
-for dif in difficulty_list0:
-    print(str(x) + ":", dif)
-    x += 1
+            self.question_label.config(text=question)
+            self.answer_var.set(None)
 
-difficulty_choosen = userinput(3, "Difficulty")
+            for i in range(4):
+                self.answer_buttons[i].config(text=answers[i], value=answers[i])
 
-# Get API-compatible values
-cate_api = categories[category_choosen - 1]["id"]
-diff_api = difficulty_list[difficulty_choosen - 1]
+        except:
+            messagebox.showerror("Error", "Failed to fetch question")
 
-# Build API URL
-url = f"https://opentdb.com/api.php?amount=1&category={cate_api}&difficulty={diff_api}&type=multiple"
+    def check_answer(self):
+        selected = self.answer_var.get()
 
-# Main quiz loop
-while True:
-    try:
-        # Fetch question from API
-        r = requests.get(url, timeout=10)
-    except:
-        # Handle timeout error
-        print("Request Timedout Check your internet connection")
+        if not selected:
+            messagebox.showwarning("Warning", "Select an answer")
+            return
 
-    # If request failed
-    if r.status_code != 200:
-        end_game = input("Failed to fetch question. Press Enter to retry or type 'quit' to exit: ")
-        if end_game == "quit":
-            break
-            
-    else:
-        # Parse JSON response
-        data = json.loads(r.text)
+        self.total += 1
 
-        # Extract question data
-        question_data = data['results'][0]
+        if selected == self.correct_answer:
+            self.score += 1
+            messagebox.showinfo("Correct", "Nice, you got it right.")
+        else:
+            messagebox.showinfo("Wrong", f"Correct answer was:\n{self.correct_answer}")
 
-        # Decode HTML characters
-        question = html.unescape(question_data['question'])
-        difficulty = question_data['difficulty']
-        category = html.unescape(question_data['category'])
-        correct_answer = html.unescape(question_data['correct_answer'])
-        answers = html.unescape(question_data['incorrect_answers'])
+        self.score_label.config(text=f"Score: {self.score}/{self.total}")
+        self.fetch_question()
 
-        # Add correct answer and shuffle options
-        answers.append(correct_answer)
-        random.shuffle(answers)
-
-        # Display question info
-        print("Category Chosen: ", category)
-        print(f"Difficulty  {difficulty}")
-        print("\n")
-        print(f"Question \n {question}")
-        answerno = 1
-
-    # Display answer options
-    for i in answers:
-        print(str(answerno) +  ":" + "",  i)
-        answerno += 1
-
-    # Get user answer
-    userans = userinput(4, "Answer number")
-    check_ans = answers[userans - 1]
-
-    # Random feedback message
-    message_for_correctans = random.choice(correct_messages)
-    message_for_incorrectans = random.choice(incorrect_messages).format(correct_answer=correct_answer)
-
-    # Check answer and update score
-    if check_ans == correct_answer:
-        print(message_for_correctans)
-        no_of_correct_answer += 1
-    else:
-        print(message_for_incorrectans)
-        no_of_incorrect_answer += 1
-
-    # Ask to play again
-    play_again = input("wanna play again if yes then enter else type 'quit': ").lower()
-    if play_again == "quit":
-        break
-
-# Final score display
-print("\nThank you for Playing 👇")
-print("########################")
-print("Your Score:")
-print("Correct answer:", no_of_correct_answer)
-print("incorrect answer:", no_of_incorrect_answer)
-print("########################")
-
-
-
-
-
+# ----------- RUN APP -----------
+root = tk.Tk()
+app = QuizApp(root)
+root.mainloop()
